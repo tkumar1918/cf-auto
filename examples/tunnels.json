@@ -1,0 +1,12 @@
+{
+  "domain": "example.com",
+  "tunnels": {
+    "web": {
+      "app": "3000",
+      "api": "8002"
+    },
+    "shop": {
+      "store": "4000"
+    }
+  }
+}

@@ -63,9 +63,12 @@ Actions:
   create <name> --map sub=service[,...]
                     Create/update the tunnel, set its ingress config, and route
                     each subdomain's DNS CNAME. Re-running adds/updates (idempotent).
-                    Example: create webspacehub --map app=3000,api=8002
+                    Example: create web --map app=3000,api=8002
+  apply <file>      Provision every tunnel in a JSON spec (declarative). See below.
   up <name> [-d]    Run the tunnel (foreground). With -d/--background, run
                     detached (writes pid + log under ~/.config/cf-tunnel/run).
+  install <name>    Install a systemd --user service so the tunnel auto-starts.
+  uninstall <name>  Stop and remove the systemd --user service.
   stop <name>       Stop a backgrounded tunnel.
   status [name]     Show running/stopped state of backgrounded tunnels.
   logs <name> [-f]  Show a backgrounded tunnel's log (-f to follow).
@@ -76,6 +79,10 @@ Actions:
   list              List all tunnels in the account.
   domain [name]     Show/choose the default domain (saved for future runs).
   auth [token]      Save an API token to the config (verified; prompts if omitted).
+
+Spec file (apply): JSON of the form
+  { "domain": "example.com",
+    "tunnels": { "web": { "app": "3000", "api": "8002" }, "shop": { "store": "4000" } } }
 
 Options:
   -m, --map <sub=service[,...]>  Mappings for create, comma-separated. Shorthand:
@@ -330,9 +337,11 @@ hostname_owner() {
 # ---------------------------------------------------------------------------
 # Actions
 # ---------------------------------------------------------------------------
-action_create() {
-  [[ -n "$NAME" ]]          || die "create requires a name: create <name> --map sub=service"
-  [[ "${#MAPS[@]}" -gt 0 ]] || die "create requires --map sub=service[,sub=service...]"
+# Ensure tunnel NAME exists and serves the mappings in MAPS (create-or-update
+# ingress + route DNS). Shared by `create` and `apply`.
+provision_tunnel() {
+  [[ -n "$NAME" ]]          || die "a tunnel name is required"
+  [[ "${#MAPS[@]}" -gt 0 ]] || die "at least one sub=service mapping is required"
 
   local tid; tid="$(tunnel_id "$NAME")"
   if [[ -z "$tid" ]]; then
@@ -381,11 +390,43 @@ action_create() {
     dns_upsert "$h" "$tid"
     printf ' %s✓%s\n' "$C_OK" "$C_RST"
   done < <(printf '%s\n' "${!want[@]}" | sort)
-
-  echo
   ok "Tunnel '${NAME}' ready with ${#want[@]} subdomain(s)."
+}
+
+action_create() {
+  provision_tunnel
   action_show "$NAME"
   info "Start it with:  $0 up ${NAME}"
+}
+
+# Apply a JSON spec, provisioning each tunnel to match it. Schema:
+#   { "domain": "example.com",          # optional, overrides the default
+#     "tunnels": { "web": { "app": "3000", "api": "8002" }, ... } }
+action_apply() {
+  local file="$NAME"
+  [[ -n "$file" ]] || die "apply requires a spec file: apply <file.json>"
+  [[ -f "$file" ]] || die "Spec file not found: ${file}"
+  jq empty "$file" 2>/dev/null || die "Spec is not valid JSON: ${file}"
+
+  local d; d="$(jq -r '.domain // empty' "$file")"
+  if [[ -n "$d" ]]; then DOMAIN="$d"; DOMAIN_EXPLICIT=1; fi
+  ensure_domain
+  _fetch_zone
+
+  local names; names="$(jq -r '.tunnels // {} | keys[]' "$file")"
+  [[ -n "$names" ]] || die "Spec has no tunnels."
+  local t sub svc
+  while IFS= read -r t; do
+    [[ -n "$t" ]] || continue
+    info "── Applying tunnel '${t}' ──"
+    NAME="$t"; MAPS=()
+    while IFS=$'\t' read -r sub svc; do [[ -n "$sub" ]] && MAPS+=("${sub}=${svc}"); done \
+      < <(jq -r --arg t "$t" '.tunnels[$t] | to_entries[] | "\(.key)\t\(.value)"' "$file")
+    if [[ "${#MAPS[@]}" -eq 0 ]]; then warn "Tunnel '${t}' has no mappings; skipping."; continue; fi
+    provision_tunnel
+  done <<< "$names"
+  echo
+  ok "Applied $(jq -r '.tunnels | length' "$file") tunnel(s) from ${file}."
 }
 
 pidfile() { echo "${RUN_DIR}/${1}.pid"; }
@@ -579,6 +620,61 @@ action_domain() {
 }
 
 # ---------------------------------------------------------------------------
+# systemd boot persistence (Linux, --user services)
+# ---------------------------------------------------------------------------
+# Absolute path to this command, for the service's ExecStart.
+self_path() {
+  if command -v cf-tunnel >/dev/null 2>&1; then command -v cf-tunnel; return; fi
+  local p="$0"; [[ "$p" != /* ]] && p="$(cd "$(dirname "$p")" && pwd)/$(basename "$p")"
+  echo "$p"
+}
+unit_dir()  { echo "${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"; }
+unit_name() { echo "cf-tunnel-${1}.service"; }
+
+# Generate, enable, and start a systemd --user service for a tunnel.
+action_install() {
+  [[ -n "$NAME" ]] || die "install requires a name: install <name>"
+  command -v systemctl >/dev/null 2>&1 || die "systemctl not found; 'install' needs Linux + systemd."
+  [[ -n "$(config_get token)" ]] || die "Save your token first (the service can't read your shell env): $0 auth <token>"
+  local tid; tid="$(tunnel_id "$NAME")"
+  [[ -n "$tid" ]] || die "No tunnel named '${NAME}'. Create it first."
+
+  local dir bin uf; dir="$(unit_dir)"; mkdir -p "$dir"
+  bin="$(self_path)"; uf="${dir}/$(unit_name "$NAME")"
+  cat > "$uf" <<EOF
+[Unit]
+Description=cf-tunnel: ${NAME}
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=${bin} up ${NAME}
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
+EOF
+  ok "Wrote ${uf}"
+  systemctl --user daemon-reload
+  systemctl --user enable --now "$(unit_name "$NAME")"
+  ok "Service cf-tunnel-${NAME} enabled and started."
+  info "Status: systemctl --user status cf-tunnel-${NAME}"
+  info "Logs:   journalctl --user -u cf-tunnel-${NAME} -f"
+  info "To run without an active login (boot persistence): sudo loginctl enable-linger ${USER}"
+}
+
+# Stop, disable, and remove a tunnel's systemd --user service.
+action_uninstall() {
+  [[ -n "$NAME" ]] || die "uninstall requires a name: uninstall <name>"
+  command -v systemctl >/dev/null 2>&1 || die "systemctl not found."
+  systemctl --user disable --now "$(unit_name "$NAME")" 2>/dev/null || true
+  rm -f "$(unit_dir)/$(unit_name "$NAME")"
+  systemctl --user daemon-reload 2>/dev/null || true
+  ok "Removed service cf-tunnel-${NAME}."
+}
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 main() {
@@ -587,6 +683,7 @@ main() {
     # _fetch_zone runs in the parent shell so _ACCT/_ZONE are cached for the
     # action's subshell calls (otherwise each $(account_id) re-hits /zones).
     create)         preflight; ensure_domain; _fetch_zone; action_create ;;
+    apply)          preflight; action_apply ;;
     up)             preflight; ensure_domain; _fetch_zone; action_up ;;
     remove|rm)      preflight; ensure_domain; _fetch_zone; action_remove ;;
     destroy)        preflight; ensure_domain; _fetch_zone; action_destroy ;;
@@ -594,11 +691,13 @@ main() {
     list)           preflight; ensure_domain; _fetch_zone; action_list ;;
     domain)         preflight; action_domain ;;
     auth|login)     preflight_tools; action_auth ;;
+    install)        preflight; ensure_domain; _fetch_zone; action_install ;;
+    uninstall)      action_uninstall ;;
     stop|down)      action_stop ;;
     status|ps)      action_status ;;
     logs)           action_logs ;;
     -h|--help|help) usage ;;
-    *)              die "Unknown action: '$ACTION' (expected create|up|remove|destroy|show|list|domain|auth|stop|status|logs)" ;;
+    *)              die "Unknown action: '$ACTION' (expected create|apply|up|remove|destroy|show|list|domain|auth|install|uninstall|stop|status|logs)" ;;
   esac
 }
 

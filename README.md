@@ -88,7 +88,7 @@ The installer tracks the latest (`main`) by default. Use `SKIP_DEPS=1` to skip
 dependency install, `PREFIX=/path/bin` to choose the directory, and `REF` to pin
 a version:
 
-    REF=v1.1.0 curl -fsSL https://raw.githubusercontent.com/tkumar1918/cf-auto/v1.1.0/install.sh | bash
+    REF=v1.2.0 curl -fsSL https://raw.githubusercontent.com/tkumar1918/cf-auto/v1.2.0/install.sh | bash
 
 Manual alternative:
 
@@ -104,7 +104,10 @@ Or clone the repo and run `./cf-tunnel.sh` directly.
 | Action                                  | Description                                                                |
 | --------------------------------------- | -------------------------------------------------------------------------- |
 | `create <name> --map sub=service[,...]` | Create/update the tunnel, set its ingress config, route each subdomain's DNS. Idempotent. |
+| `apply <file>`                          | Provision every tunnel in a JSON spec (declarative). See below.            |
 | `up <name> [-d]`                        | Run the tunnel (foreground). `-d`/`--background` runs it detached.          |
+| `install <name>`                        | Install a systemd `--user` service so the tunnel auto-starts on boot.       |
+| `uninstall <name>`                      | Stop and remove the systemd `--user` service.                              |
 | `stop <name>`                           | Stop a backgrounded tunnel.                                                |
 | `status [name]`                         | Show running/stopped state of backgrounded tunnels.                        |
 | `logs <name> [-f]`                      | Show a backgrounded tunnel's log (`-f` to follow).                         |
@@ -175,6 +178,47 @@ Duplicate *services* are fine: `app=3000` and `dashboard=3000` (different
 subdomains, same port) both work. The backend distinguishes them by the `Host`
 header, which cloudflared forwards as the public hostname.
 
+## Declarative apply
+
+Describe all your tunnels and their subdomains in one JSON file and apply it:
+
+    cf-tunnel apply tunnels.json
+
+```json
+{
+  "domain": "example.com",
+  "tunnels": {
+    "web":  { "app": "3000", "api": "8002" },
+    "shop": { "store": "4000" }
+  }
+}
+```
+
+Each tunnel is created-or-updated to include its mappings (same idempotent logic
+as `create`), and DNS is routed for every subdomain. `domain` is optional and
+overrides the default for that run. Use `-y` to auto-confirm conflict moves.
+Apply is additive — it doesn't delete tunnels or subdomains that aren't listed.
+See [examples/tunnels.json](examples/tunnels.json).
+
+## Boot persistence (systemd)
+
+`up -d` doesn't survive a reboot. To auto-start a tunnel on boot, install it as a
+systemd `--user` service (Linux, no root):
+
+    cf-tunnel auth <token>       # save the token first (the service reads the config)
+    cf-tunnel install myapp      # write + enable + start the service
+    cf-tunnel uninstall myapp    # stop + remove it
+
+Manage it with the usual systemd tools:
+
+    systemctl --user status cf-tunnel-myapp
+    journalctl --user -u cf-tunnel-myapp -f
+
+To keep user services running without an active login (true boot persistence),
+enable lingering once:
+
+    sudo loginctl enable-linger "$USER"
+
 ## Background tunnels
 
 `up -d` runs a tunnel detached (via `nohup`), writing pid and log files under
@@ -188,8 +232,8 @@ header, which cloudflared forwards as the public hostname.
 The run token is passed via the `TUNNEL_TOKEN` env var, so it does not appear in
 `ps`. `destroy` also stops a backgrounded instance and removes its run files.
 
-This is a lightweight, no-root approach (survives terminal close, not reboot). For
-boot persistence, use a systemd unit or `cloudflared service install <token>`.
+This is a lightweight, no-root approach (survives terminal close, not reboot).
+For boot persistence, use `cf-tunnel install` (see above).
 
 ## How it works (API)
 
