@@ -106,7 +106,7 @@ The installer tracks the latest (`main`) by default. Use `SKIP_DEPS=1` to skip
 dependency install, `PREFIX=/path/bin` to choose the directory, and `REF` to pin
 a version:
 
-    REF=v1.5.0 curl -fsSL https://raw.githubusercontent.com/tkumar1918/cf-auto/v1.5.0/install.sh | bash
+    REF=<tag> curl -fsSL https://raw.githubusercontent.com/tkumar1918/cf-auto/<tag>/install.sh | bash
 
 Manual alternative:
 
@@ -119,7 +119,7 @@ Or clone the repo and run `./cf-tunnel.sh` directly.
 
     cf-tunnel update           # update to the latest release
     cf-tunnel update main      # or track the bleeding edge
-    cf-tunnel update v1.5.2    # or pin a specific tag/branch
+    cf-tunnel update <tag>     # or pin a specific tag/branch
     cf-tunnel version          # show the installed version (also -V / --version)
 
 With no argument, `update` resolves the latest release tag and fetches it (stable
