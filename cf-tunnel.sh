@@ -169,7 +169,9 @@ preflight() {
   [[ -n "${CLOUDFLARE_API_TOKEN:-}" ]] || die "No API token. Set CLOUDFLARE_API_TOKEN, or run: $0 auth"
 }
 
-# --- tiny key=value config store (~/.config/cf-tunnel/config) ---------------
+# ---------------------------------------------------------------------------
+# Config store (~/.config/cf-tunnel/config)
+# ---------------------------------------------------------------------------
 config_get() { [[ -f "$CONFIG_FILE" ]] && sed -n "s/^$1=//p" "$CONFIG_FILE" | head -n1; }
 config_set() {
   mkdir -p "$CONFIG_DIR"
@@ -302,6 +304,7 @@ dns_upsert() {
   else api POST "/zones/${zone}/dns_records" "$body" >/dev/null; fi
 }
 
+# Delete the CNAME for a hostname (no-op with a note if it doesn't exist).
 dns_delete() {
   local zone hostname="$1"; zone="$(zone_id)"
   local recid; recid="$(api GET "/zones/${zone}/dns_records?type=CNAME&name=${hostname}" | jq -r '.[0].id // empty')"
