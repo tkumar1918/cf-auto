@@ -5,11 +5,13 @@
 #
 #   curl -fsSL https://raw.githubusercontent.com/tkumar1918/cf-auto/main/install.sh | bash
 #
-# Override the install directory:  PREFIX=/somewhere/bin  bash install.sh
+# Pin a version:        REF=v1.0.0 bash install.sh   (default: main = latest)
+# Install directory:    PREFIX=/somewhere/bin bash install.sh
 #
 set -euo pipefail
 
-RAW_URL="https://raw.githubusercontent.com/tkumar1918/cf-auto/main/cf-tunnel.sh"
+REF="${REF:-main}"
+RAW_URL="https://raw.githubusercontent.com/tkumar1918/cf-auto/${REF}/cf-tunnel.sh"
 BIN_NAME="cf-tunnel"
 
 # Pick an install directory: $PREFIX, else /usr/local/bin if writable, else ~/.local/bin.
@@ -24,7 +26,7 @@ mkdir -p "$DEST"
 
 command -v curl >/dev/null 2>&1 || { echo "error: curl is required" >&2; exit 1; }
 
-echo "Installing ${BIN_NAME} -> ${DEST}/${BIN_NAME}"
+echo "Installing ${BIN_NAME} (${REF}) -> ${DEST}/${BIN_NAME}"
 tmp="$(mktemp)"
 curl -fsSL "$RAW_URL" -o "$tmp"
 # sanity-check it's the script, not an error page

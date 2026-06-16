@@ -83,8 +83,12 @@ Then use it from anywhere:
 
     cf-tunnel --help
 
-The installer drops the script in `/usr/local/bin` (if writable) or
-`~/.local/bin`; set `PREFIX=/path/bin` to choose. Manual alternative:
+The installer tracks the latest (`main`) by default. Pin a specific version with
+`REF`, and choose the directory with `PREFIX`:
+
+    REF=v1.0.0 curl -fsSL https://raw.githubusercontent.com/tkumar1918/cf-auto/v1.0.0/install.sh | bash
+
+Manual alternative:
 
     curl -fsSL https://raw.githubusercontent.com/tkumar1918/cf-auto/main/cf-tunnel.sh \
       -o ~/.local/bin/cf-tunnel && chmod +x ~/.local/bin/cf-tunnel
@@ -204,3 +208,7 @@ boot persistence, use a systemd unit or `cloudflared service install <token>`.
   binds the port; cloudflared connects out to it.
 - `localhost` in a mapping is relative to the machine running that tunnel.
 - `show`/`list` need network access (state lives at Cloudflare).
+
+## License
+
+MIT — see [LICENSE](LICENSE).
