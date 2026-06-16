@@ -145,6 +145,8 @@ running.
 | `list`                                  | List all tunnels in the account.                                           |
 | `domain [name]`                         | Show/choose the default domain (saved for future runs).                    |
 | `auth [token]`                          | Save an API token to the config (verified; prompts if omitted).            |
+| `update [ref]`                          | Update cf-tunnel in place from GitHub (default: latest).                    |
+| `version`                               | Print the version (also `-V` / `--version`).                               |
 
 ## Options
 
