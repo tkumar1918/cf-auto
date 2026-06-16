@@ -32,17 +32,20 @@ command -v curl >/dev/null 2>&1 || { echo "error: curl is required" >&2; exit 1;
 echo "Installing ${BIN_NAME} (${REF}) -> ${DEST}/${BIN_NAME}"
 tmp="$(mktemp)"
 curl -fsSL "$RAW_URL" -o "$tmp"
-# sanity-check it's the script, not an error page
+# Sanity-check it's the script, not an error page.
 head -n1 "$tmp" | grep -q '^#!/usr/bin/env bash' || { echo "error: download didn't look like the script" >&2; rm -f "$tmp"; exit 1; }
 install -m 0755 "$tmp" "${DEST}/${BIN_NAME}"
 rm -f "$tmp"
 
-# --- auto-install runtime dependencies (jq, cloudflared) --------------------
+# ---------------------------------------------------------------------------
+# Auto-install runtime dependencies (jq, cloudflared)
+# ---------------------------------------------------------------------------
 # Static binaries go into $DEST (no root). Set SKIP_DEPS=1 to skip. curl itself
 # is assumed present (it bootstrapped this script).
 have() { command -v "$1" >/dev/null 2>&1; }
 
-dl_arch() {   # normalized arch for release binaries, empty if unsupported
+# Print the normalized arch for release binaries, or empty if unsupported.
+dl_arch() {
   case "$(uname -m)" in
     x86_64|amd64)  echo amd64 ;;
     aarch64|arm64) echo arm64 ;;
@@ -50,7 +53,8 @@ dl_arch() {   # normalized arch for release binaries, empty if unsupported
   esac
 }
 
-pkg_install() {   # best-effort distro package manager (may use sudo)
+# Install a package via the distro package manager (best-effort; may use sudo).
+pkg_install() {
   local sudo=""; [[ "$(id -u)" -ne 0 ]] && have sudo && sudo="sudo"
   if   have apt-get; then $sudo apt-get update -qq && $sudo apt-get install -y "$1"
   elif have dnf;     then $sudo dnf install -y "$1"
@@ -62,6 +66,7 @@ pkg_install() {   # best-effort distro package manager (may use sudo)
   else return 1; fi
 }
 
+# Ensure jq is present: download a static binary into $DEST, else package manager.
 install_jq() {
   have jq && return 0
   echo "Installing jq..."
@@ -74,6 +79,7 @@ install_jq() {
   pkg_install jq   # fallback for unusual arch / OS
 }
 
+# Ensure cloudflared is present: brew if available, else a static binary in $DEST.
 install_cloudflared() {
   have cloudflared && return 0
   echo "Installing cloudflared..."
