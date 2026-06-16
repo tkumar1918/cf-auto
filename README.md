@@ -106,7 +106,7 @@ The installer tracks the latest (`main`) by default. Use `SKIP_DEPS=1` to skip
 dependency install, `PREFIX=/path/bin` to choose the directory, and `REF` to pin
 a version:
 
-    REF=v1.4.0 curl -fsSL https://raw.githubusercontent.com/tkumar1918/cf-auto/v1.4.0/install.sh | bash
+    REF=v1.5.0 curl -fsSL https://raw.githubusercontent.com/tkumar1918/cf-auto/v1.5.0/install.sh | bash
 
 Manual alternative:
 
@@ -114,6 +114,16 @@ Manual alternative:
       -o ~/.local/bin/cf-tunnel && chmod +x ~/.local/bin/cf-tunnel
 
 Or clone the repo and run `./cf-tunnel.sh` directly.
+
+## Updating
+
+    cf-tunnel update           # rewrite the installed script with the latest (main)
+    cf-tunnel update v1.5.0    # or pin a specific release/branch/tag
+    cf-tunnel version          # show the installed version (also -V / --version)
+
+`update` re-downloads the script over itself in place (equivalent to re-running
+the installer). It uses an atomic replace, so it's safe to run while a tunnel is
+running.
 
 ## Commands
 

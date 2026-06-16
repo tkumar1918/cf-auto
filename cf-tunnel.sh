@@ -21,6 +21,8 @@ set -euo pipefail
 # Defaults & globals
 # ---------------------------------------------------------------------------
 API="https://api.cloudflare.com/client/v4"
+VERSION="1.5.0"
+RAW_BASE="https://raw.githubusercontent.com/tkumar1918/cf-auto"
 CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/cf-tunnel"
 CONFIG_FILE="${CONFIG_DIR}/config"
 RUN_DIR="${CONFIG_DIR}/run"   # pid + log files for backgrounded tunnels
@@ -81,6 +83,8 @@ Actions:
   list              List all tunnels in the account.
   domain [name]     Show/choose the default domain (saved for future runs).
   auth [token]      Save an API token to the config (verified; prompts if omitted).
+  update [ref]      Update cf-tunnel in place from GitHub (default: latest).
+  version           Print the version (also: -V, --version).
 
 Spec file (apply): JSON of the form
   { "domain": "example.com",
@@ -148,6 +152,7 @@ parse_args() {
       --prune)         PRUNE=1; shift ;;
       -y|--yes)        ASSUME_YES=1; shift ;;
       -h|--help)       usage; exit 0 ;;
+      -V|--version)    echo "cf-tunnel ${VERSION}"; exit 0 ;;
       *)               die "Unknown argument: $1 (try --help)" ;;
     esac
   done
@@ -656,6 +661,20 @@ action_auth() {
   warn "It is stored in PLAINTEXT — keep this file private. The env var CLOUDFLARE_API_TOKEN overrides it."
 }
 
+# Re-download the script over itself from GitHub (default ref: latest on main).
+# Uses `mv` so the running process keeps its old inode until it exits.
+action_update() {
+  local ref="${NAME:-main}" target="$0"
+  [[ "$target" != /* ]] && target="$(cd "$(dirname "$target")" && pwd)/$(basename "$target")"
+  [[ -w "$target" ]] || die "Cannot write ${target} (re-run the installer, or use sudo)."
+  info "Updating ${target} (from ${ref})..."
+  local tmp; tmp="$(mktemp)"
+  curl -fsSL "${RAW_BASE}/${ref}/cf-tunnel.sh" -o "$tmp" || { rm -f "$tmp"; die "Download failed."; }
+  head -n1 "$tmp" | grep -q '^#!/usr/bin/env bash' || { rm -f "$tmp"; die "Downloaded file doesn't look like cf-tunnel."; }
+  chmod +x "$tmp"; mv -f "$tmp" "$target"
+  ok "Updated to $("$target" --version 2>/dev/null || echo "$ref")."
+}
+
 # Show/set the default domain. `domain` re-picks; `domain <name>` sets directly.
 action_domain() {
   if [[ -n "$NAME" ]]; then
@@ -747,8 +766,10 @@ main() {
     stop|down)      action_stop ;;
     status|ps)      action_status ;;
     logs)           action_logs ;;
+    update)         preflight_tools; action_update ;;
+    version|--version|-V) echo "cf-tunnel ${VERSION}" ;;
     -h|--help|help) usage ;;
-    *)              die "Unknown action: '$ACTION' (expected create|apply|up|remove|destroy|show|list|domain|auth|install|uninstall|stop|status|logs)" ;;
+    *)              die "Unknown action: '$ACTION' (expected create|apply|up|remove|destroy|show|list|domain|auth|install|uninstall|stop|status|logs|update|version)" ;;
   esac
 }
 
