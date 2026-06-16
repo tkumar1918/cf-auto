@@ -117,13 +117,14 @@ Or clone the repo and run `./cf-tunnel.sh` directly.
 
 ## Updating
 
-    cf-tunnel update           # rewrite the installed script with the latest (main)
-    cf-tunnel update v1.5.0    # or pin a specific release/branch/tag
+    cf-tunnel update           # update to the latest release
+    cf-tunnel update main      # or track the bleeding edge
+    cf-tunnel update v1.5.0    # or pin a specific tag/branch
     cf-tunnel version          # show the installed version (also -V / --version)
 
-`update` re-downloads the script over itself in place (equivalent to re-running
-the installer). It uses an atomic replace, so it's safe to run while a tunnel is
-running.
+With no argument, `update` resolves the latest release tag and fetches it (stable
+and immediate). It re-downloads the script over itself with an atomic replace, so
+it's safe to run while a tunnel is running.
 
 ## Commands
 

@@ -21,7 +21,7 @@ set -euo pipefail
 # Defaults & globals
 # ---------------------------------------------------------------------------
 API="https://api.cloudflare.com/client/v4"
-VERSION="1.5.0"
+VERSION="1.5.1"
 RAW_BASE="https://raw.githubusercontent.com/tkumar1918/cf-auto"
 CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/cf-tunnel"
 CONFIG_FILE="${CONFIG_DIR}/config"
@@ -83,7 +83,7 @@ Actions:
   list              List all tunnels in the account.
   domain [name]     Show/choose the default domain (saved for future runs).
   auth [token]      Save an API token to the config (verified; prompts if omitted).
-  update [ref]      Update cf-tunnel in place from GitHub (default: latest).
+  update [ref]      Update cf-tunnel in place (default: latest release; or a tag/branch).
   version           Print the version (also: -V, --version).
 
 Spec file (apply): JSON of the form
@@ -661,10 +661,16 @@ action_auth() {
   warn "It is stored in PLAINTEXT — keep this file private. The env var CLOUDFLARE_API_TOKEN overrides it."
 }
 
-# Re-download the script over itself from GitHub (default ref: latest on main).
+# Re-download the script over itself from GitHub. With no ref, use the latest
+# release tag (immediate + stable); `update main` tracks the bleeding edge.
 # Uses `mv` so the running process keeps its old inode until it exits.
 action_update() {
-  local ref="${NAME:-main}" target="$0"
+  local ref="${NAME:-}"
+  if [[ -z "$ref" ]]; then
+    ref="$(curl -fsSL "https://api.github.com/repos/tkumar1918/cf-auto/releases/latest" 2>/dev/null | jq -r '.tag_name // empty')"
+    [[ -n "$ref" ]] || ref="main"
+  fi
+  local target="$0"
   [[ "$target" != /* ]] && target="$(cd "$(dirname "$target")" && pwd)/$(basename "$target")"
   [[ -w "$target" ]] || die "Cannot write ${target} (re-run the installer, or use sudo)."
   info "Updating ${target} (from ${ref})..."
