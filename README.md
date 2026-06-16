@@ -74,8 +74,9 @@ Change it anytime, or override per-command:
 
 ## Install
 
-Install it as a global `cf-tunnel` command (downloads the latest script onto
-your PATH):
+Install it as a global `cf-tunnel` command. The installer downloads the latest
+script onto your PATH **and auto-installs missing dependencies** (`jq` and
+`cloudflared`) into the same directory:
 
     curl -fsSL https://raw.githubusercontent.com/tkumar1918/cf-auto/main/install.sh | bash
 
@@ -83,10 +84,11 @@ Then use it from anywhere:
 
     cf-tunnel --help
 
-The installer tracks the latest (`main`) by default. Pin a specific version with
-`REF`, and choose the directory with `PREFIX`:
+The installer tracks the latest (`main`) by default. Use `SKIP_DEPS=1` to skip
+dependency install, `PREFIX=/path/bin` to choose the directory, and `REF` to pin
+a version:
 
-    REF=v1.0.0 curl -fsSL https://raw.githubusercontent.com/tkumar1918/cf-auto/v1.0.0/install.sh | bash
+    REF=v1.1.0 curl -fsSL https://raw.githubusercontent.com/tkumar1918/cf-auto/v1.1.0/install.sh | bash
 
 Manual alternative:
 
