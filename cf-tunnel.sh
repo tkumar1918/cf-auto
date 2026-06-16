@@ -37,8 +37,9 @@ FOLLOW=0             # 1 when `logs` should tail -f
 PRUNE=0              # 1 when create/apply should remove unlisted subdomains
 declare -a MAPS=()
 
-_ACCT=""   # memoized account id
-_ZONE=""   # memoized zone id (for $DOMAIN)
+_ACCT=""              # memoized account id
+_ZONES_LOADED=0       # 1 once zones have been fetched
+declare -A ZONE_ID=() # zone name -> id (every zone the token can see)
 
 # ---------------------------------------------------------------------------
 # Output helpers
@@ -85,8 +86,15 @@ Spec file (apply): JSON of the form
   { "domain": "example.com",
     "tunnels": { "web": { "app": "3000", "api": "8002" }, "shop": { "store": "4000" } } }
 
+Multiple domains (same account): a mapping key that already ends in one of your
+zones is used as a full hostname; a bare label gets the default domain. So one
+tunnel can span domains, e.g. --map app.foo.com=3000,api.bar.com=8002. Needs a
+token scoped to those zones (Zone Resources: all zones, or each one).
+
 Options:
-  -m, --map <sub=service[,...]>  Mappings for create, comma-separated. Shorthand:
+  -m, --map <sub=service[,...]>  Mappings for create, comma-separated. The key is
+                             a bare label (uses the default domain) or a full
+                             hostname under any visible zone. Service shorthand:
                              app=3000            -> http://localhost:3000
                              app=localhost:3000  -> http://localhost:3000
                              app=http://h:3000   -> as-is
@@ -239,18 +247,44 @@ api() {
   jq -c '.result' <<<"$resp"
 }
 
-# Fetch the zone once and memoize both its id and its owning account id.
-# (Deriving the account id from the zone avoids needing account-list permission.)
-_fetch_zone() {
-  [[ -n "$_ZONE" ]] && return
-  local z; z="$(api GET "/zones?name=${DOMAIN}")"
-  _ZONE="$(jq -r '.[0].id // empty' <<<"$z")"
-  [[ -n "$_ZONE" ]] || die "Zone '${DOMAIN}' not found for this token (needs Zone>Read)."
+# Fetch every zone the token can see (name -> id) and the account id, once.
+# (Deriving the account from a zone avoids needing account-list permission.)
+_fetch_zones() {
+  [[ "$_ZONES_LOADED" -eq 1 ]] && return
+  local z name id; z="$(api GET "/zones?per_page=50")"
+  while IFS=$'\t' read -r name id; do
+    [[ -n "$name" ]] && ZONE_ID["$name"]="$id"
+  done < <(jq -r '.[] | [.name, .id] | @tsv' <<<"$z")
+  [[ "${#ZONE_ID[@]}" -gt 0 ]] || die "This token can't see any zones (needs Zone>Read)."
   _ACCT="${CLOUDFLARE_ACCOUNT_ID:-$(jq -r '.[0].account.id // empty' <<<"$z")}"
   [[ -n "$_ACCT" ]] || die "Could not determine account id. Set CLOUDFLARE_ACCOUNT_ID."
+  _ZONES_LOADED=1
 }
-account_id() { _fetch_zone; echo "$_ACCT"; }
-zone_id()    { _fetch_zone; echo "$_ZONE"; }
+account_id() { _fetch_zones; echo "$_ACCT"; }
+
+# Print the zone id that owns a hostname (longest matching zone-name suffix).
+zone_for_host() {
+  _fetch_zones
+  local host="$1" name best=""
+  for name in "${!ZONE_ID[@]}"; do
+    if [[ "$host" == "$name" || "$host" == *".${name}" ]]; then
+      [[ "${#name}" -gt "${#best}" ]] && best="$name"
+    fi
+  done
+  [[ -n "$best" ]] || die "No visible zone owns hostname '${host}'."
+  echo "${ZONE_ID[$best]}"
+}
+
+# Resolve a mapping key to a full hostname: a key already ending in a visible
+# zone is used as-is (any domain); otherwise the default domain is appended.
+map_hostname() {
+  _fetch_zones
+  local key="$1" name
+  for name in "${!ZONE_ID[@]}"; do
+    [[ "$key" == "$name" || "$key" == *".${name}" ]] && { echo "$key"; return; }
+  done
+  echo "${key}.${DOMAIN}"
+}
 
 # ---------------------------------------------------------------------------
 # Tunnel + config + DNS primitives
@@ -306,7 +340,7 @@ config_drop_host() {
 
 # Upsert a proxied CNAME hostname -> <tid>.cfargotunnel.com.
 dns_upsert() {
-  local zone hostname="$1" tid="$2"; zone="$(zone_id)"
+  local hostname="$1" tid="$2" zone; zone="$(zone_for_host "$hostname")"
   local content="${tid}.cfargotunnel.com"
   local recid; recid="$(api GET "/zones/${zone}/dns_records?type=CNAME&name=${hostname}" | jq -r '.[0].id // empty')"
   local body; body="$(jq -nc --arg n "$hostname" --arg c "$content" '{type:"CNAME", name:$n, content:$c, proxied:true}')"
@@ -316,7 +350,7 @@ dns_upsert() {
 
 # Delete the CNAME for a hostname (no-op with a note if it doesn't exist).
 dns_delete() {
-  local zone hostname="$1"; zone="$(zone_id)"
+  local hostname="$1" zone; zone="$(zone_for_host "$hostname")"
   local recid; recid="$(api GET "/zones/${zone}/dns_records?type=CNAME&name=${hostname}" | jq -r '.[0].id // empty')"
   if [[ -n "$recid" ]]; then
     api DELETE "/zones/${zone}/dns_records/${recid}" >/dev/null
@@ -364,11 +398,11 @@ provision_tunnel() {
     for h in "${!current[@]}"; do want["$h"]="${current[$h]}"; done
   fi
 
-  local entry sub svc hostname owner oid oname
+  local entry key svc hostname owner oid oname
   for entry in "${MAPS[@]}"; do
     [[ "$entry" == *=* ]] || die "Bad mapping '$entry' (expected sub=service)"
-    sub="${entry%%=*}"; svc="$(normalize_service "${entry#*=}")"
-    hostname="${sub}.${DOMAIN}"
+    key="${entry%%=*}"; svc="$(normalize_service "${entry#*=}")"
+    hostname="$(map_hostname "$key")"
 
     owner="$(hostname_owner "$hostname" "$tid")"
     if [[ -n "$owner" ]]; then
@@ -428,7 +462,7 @@ action_apply() {
   local d; d="$(jq -r '.domain // empty' "$file")"
   if [[ -n "$d" ]]; then DOMAIN="$d"; DOMAIN_EXPLICIT=1; fi
   ensure_domain
-  _fetch_zone
+  _fetch_zones
 
   local names; names="$(jq -r '.tunnels // {} | keys[]' "$file")"
   [[ -n "$names" ]] || die "Spec has no tunnels."
@@ -697,18 +731,18 @@ action_uninstall() {
 main() {
   parse_args "$@"
   case "$ACTION" in
-    # _fetch_zone runs in the parent shell so _ACCT/_ZONE are cached for the
+    # _fetch_zones runs in the parent shell so _ACCT/ZONE_ID are cached for the
     # action's subshell calls (otherwise each $(account_id) re-hits /zones).
-    create)         preflight; ensure_domain; _fetch_zone; action_create ;;
+    create)         preflight; ensure_domain; _fetch_zones; action_create ;;
     apply)          preflight; action_apply ;;
-    up)             preflight; ensure_domain; _fetch_zone; action_up ;;
-    remove|rm)      preflight; ensure_domain; _fetch_zone; action_remove ;;
-    destroy)        preflight; ensure_domain; _fetch_zone; action_destroy ;;
-    show)           preflight; ensure_domain; _fetch_zone; action_show ;;
-    list)           preflight; ensure_domain; _fetch_zone; action_list ;;
+    up)             preflight; ensure_domain; _fetch_zones; action_up ;;
+    remove|rm)      preflight; ensure_domain; _fetch_zones; action_remove ;;
+    destroy)        preflight; ensure_domain; _fetch_zones; action_destroy ;;
+    show)           preflight; ensure_domain; _fetch_zones; action_show ;;
+    list)           preflight; ensure_domain; _fetch_zones; action_list ;;
     domain)         preflight; action_domain ;;
     auth|login)     preflight_tools; action_auth ;;
-    install)        preflight; ensure_domain; _fetch_zone; action_install ;;
+    install)        preflight; ensure_domain; _fetch_zones; action_install ;;
     uninstall)      action_uninstall ;;
     stop|down)      action_stop ;;
     status|ps)      action_status ;;

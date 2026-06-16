@@ -72,6 +72,24 @@ Change it anytime, or override per-command:
     ./cf-tunnel.sh domain example.com    # set directly (must be visible to token)
     ./cf-tunnel.sh create myapp --map x=3000 --domain example.com   # one-off override
 
+## Multiple domains
+
+One account can hold many domains, and the script manages them all:
+
+- Account-wide commands (`list`, `show`, `destroy`, `up`, `install`) already span
+  every tunnel, regardless of domain.
+- Per-domain commands (`create`, `apply`, `remove`) target a domain via the bare
+  key + default domain, or by using a **full hostname** as the mapping key. A key
+  ending in one of your visible zones is used as-is; otherwise the default domain
+  is appended. So one tunnel can serve subdomains across domains:
+
+      cf-tunnel create gw --map app.foo.com=3000,api.bar.com=8002
+
+  In an `apply` spec, mapping keys may likewise be full hostnames spanning domains.
+
+Requirement: the token must be scoped to those zones — **Zone Resources → All
+zones**, or list each zone. A single-zone token only manages that one domain.
+
 ## Install
 
 Install it as a global `cf-tunnel` command. The installer downloads the latest
@@ -88,7 +106,7 @@ The installer tracks the latest (`main`) by default. Use `SKIP_DEPS=1` to skip
 dependency install, `PREFIX=/path/bin` to choose the directory, and `REF` to pin
 a version:
 
-    REF=v1.3.0 curl -fsSL https://raw.githubusercontent.com/tkumar1918/cf-auto/v1.3.0/install.sh | bash
+    REF=v1.4.0 curl -fsSL https://raw.githubusercontent.com/tkumar1918/cf-auto/v1.4.0/install.sh | bash
 
 Manual alternative:
 
@@ -137,6 +155,9 @@ Or clone the repo and run `./cf-tunnel.sh` directly.
 A mapping is `sub=service`. Pass them with `--map`, comma-separated:
 
     ./cf-tunnel.sh create myapp --map app=3000,api=8002,shop=4000
+
+The key is normally a bare label (gets the default domain). It can also be a full
+hostname under any zone your token can see — see [Multiple domains](#multiple-domains).
 
 ### Service shorthand
 
