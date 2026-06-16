@@ -88,7 +88,7 @@ The installer tracks the latest (`main`) by default. Use `SKIP_DEPS=1` to skip
 dependency install, `PREFIX=/path/bin` to choose the directory, and `REF` to pin
 a version:
 
-    REF=v1.2.0 curl -fsSL https://raw.githubusercontent.com/tkumar1918/cf-auto/v1.2.0/install.sh | bash
+    REF=v1.3.0 curl -fsSL https://raw.githubusercontent.com/tkumar1918/cf-auto/v1.3.0/install.sh | bash
 
 Manual alternative:
 
@@ -128,6 +128,7 @@ Or clone the repo and run `./cf-tunnel.sh` directly.
 | `--domain <domain>`             | create, remove  | Zone/apex domain (overrides the saved default).    |
 | `-d, --background`              | up              | Run detached.                                      |
 | `-f, --follow`                  | logs            | Follow the log (`tail -f`).                        |
+| `--prune`                       | apply, create   | Remove subdomains not in the spec (exact match).   |
 | `-y, --yes`                     | create, destroy | Don't prompt (auto-confirm conflict moves/destroy).|
 | `-h, --help`                    | any             | Show usage.                                        |
 
@@ -197,7 +198,14 @@ Describe all your tunnels and their subdomains in one JSON file and apply it:
 Each tunnel is created-or-updated to include its mappings (same idempotent logic
 as `create`), and DNS is routed for every subdomain. `domain` is optional and
 overrides the default for that run. Use `-y` to auto-confirm conflict moves.
-Apply is additive — it doesn't delete tunnels or subdomains that aren't listed.
+
+By default apply is **additive** — it never removes anything. Add `--prune` to
+make each listed tunnel match its spec exactly: subdomains on those tunnels that
+aren't in the JSON are removed (ingress + their DNS). Tunnels not listed in the
+JSON are always left untouched, with or without `--prune`.
+
+    cf-tunnel apply tunnels.json --prune
+
 See [examples/tunnels.json](examples/tunnels.json).
 
 ## Boot persistence (systemd)

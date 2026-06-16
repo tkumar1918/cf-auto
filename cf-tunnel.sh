@@ -34,6 +34,7 @@ DOMAIN_EXPLICIT=0    # 1 when --domain was passed (overrides saved default)
 ASSUME_YES=0
 BACKGROUND=0         # 1 when `up` should run detached
 FOLLOW=0             # 1 when `logs` should tail -f
+PRUNE=0              # 1 when create/apply should remove unlisted subdomains
 declare -a MAPS=()
 
 _ACCT=""   # memoized account id
@@ -94,6 +95,7 @@ Options:
       --domain <domain>    Zone/apex domain (overrides saved default)
   -d, --background         Run detached                         (up)
   -f, --follow             Follow the log (tail -f)             (logs)
+      --prune              Remove subdomains not in the spec    (apply, create)
   -y, --yes                Don't prompt (auto-confirm move/destroy)
   -h, --help               Show this help
 
@@ -135,6 +137,7 @@ parse_args() {
       --domain)        DOMAIN="${2:-}"; DOMAIN_EXPLICIT=1; shift 2 ;;
       -d|--background|--detach) BACKGROUND=1; shift ;;
       -f|--follow)     FOLLOW=1; shift ;;
+      --prune)         PRUNE=1; shift ;;
       -y|--yes)        ASSUME_YES=1; shift ;;
       -h|--help)       usage; exit 0 ;;
       *)               die "Unknown argument: $1 (try --help)" ;;
@@ -352,10 +355,14 @@ provision_tunnel() {
     info "Using existing tunnel '${NAME}' (id ${tid})"
   fi
 
-  # Seed desired pairs from the tunnel's current ingress.
-  declare -A want=()
+  # Snapshot current ingress. The desired set keeps the existing subdomains,
+  # except under --prune, which makes the tunnel match exactly the given maps.
+  declare -A current=() want=()
   local h s
-  while IFS=$'\t' read -r h s; do [[ -n "$h" ]] && want["$h"]="$s"; done < <(tunnel_pairs "$tid")
+  while IFS=$'\t' read -r h s; do [[ -n "$h" ]] && current["$h"]="$s"; done < <(tunnel_pairs "$tid")
+  if [[ "$PRUNE" -ne 1 ]]; then
+    for h in "${!current[@]}"; do want["$h"]="${current[$h]}"; done
+  fi
 
   local entry sub svc hostname owner oid oname
   for entry in "${MAPS[@]}"; do
@@ -390,6 +397,16 @@ provision_tunnel() {
     dns_upsert "$h" "$tid"
     printf ' %s✓%s\n' "$C_OK" "$C_RST"
   done < <(printf '%s\n' "${!want[@]}" | sort)
+
+  # --prune: drop DNS for subdomains that were present but are no longer desired
+  # (their ingress entries are already gone, since put_config wrote only `want`).
+  if [[ "$PRUNE" -eq 1 ]]; then
+    for h in "${!current[@]}"; do
+      [[ -n "${want[$h]+x}" ]] && continue
+      info "Pruning ${h}"
+      dns_delete "$h"
+    done
+  fi
   ok "Tunnel '${NAME}' ready with ${#want[@]} subdomain(s)."
 }
 
