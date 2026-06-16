@@ -74,7 +74,22 @@ Change it anytime, or override per-command:
 
 ## Install
 
-    chmod +x cf-tunnel.sh
+Install it as a global `cf-tunnel` command (downloads the latest script onto
+your PATH):
+
+    curl -fsSL https://raw.githubusercontent.com/tkumar1918/cf-auto/main/install.sh | bash
+
+Then use it from anywhere:
+
+    cf-tunnel --help
+
+The installer drops the script in `/usr/local/bin` (if writable) or
+`~/.local/bin`; set `PREFIX=/path/bin` to choose. Manual alternative:
+
+    curl -fsSL https://raw.githubusercontent.com/tkumar1918/cf-auto/main/cf-tunnel.sh \
+      -o ~/.local/bin/cf-tunnel && chmod +x ~/.local/bin/cf-tunnel
+
+Or clone the repo and run `./cf-tunnel.sh` directly.
 
 ## Commands
 
