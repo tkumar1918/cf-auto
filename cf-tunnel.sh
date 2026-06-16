@@ -21,7 +21,7 @@ set -euo pipefail
 # Defaults & globals
 # ---------------------------------------------------------------------------
 API="https://api.cloudflare.com/client/v4"
-VERSION="1.5.1"
+VERSION="1.5.2"
 RAW_BASE="https://raw.githubusercontent.com/tkumar1918/cf-auto"
 CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/cf-tunnel"
 CONFIG_FILE="${CONFIG_DIR}/config"
@@ -178,7 +178,7 @@ confirm() {
 }
 
 # ---------------------------------------------------------------------------
-# Cloudflare API
+# Preflight & auth
 # ---------------------------------------------------------------------------
 preflight_tools() {
   command -v jq   >/dev/null 2>&1 || die "jq not found (apt install jq)."
@@ -205,10 +205,9 @@ config_set() {
 
 # Interactively pick a domain from the zones the token can see, then save it.
 pick_domain() {
-  local zones; zones="$(api GET "/zones?per_page=50" | jq -r '.[].name')"
-  [[ -n "$zones" ]] || die "This token can't see any zones (needs Zone>Read)."
+  _fetch_zones
   local -a list=(); local z
-  while IFS= read -r z; do [[ -n "$z" ]] && list+=("$z"); done <<< "$zones"
+  while IFS= read -r z; do list+=("$z"); done < <(printf '%s\n' "${!ZONE_ID[@]}" | sort)
 
   if [[ "${#list[@]}" -eq 1 ]]; then
     DOMAIN="${list[0]}"
@@ -234,6 +233,9 @@ ensure_domain() {
   pick_domain
 }
 
+# ---------------------------------------------------------------------------
+# Cloudflare API & zones
+# ---------------------------------------------------------------------------
 # Raw call: prints the full JSON response.
 cf_raw() {
   local method="$1" path="$2" data="${3:-}"
@@ -696,7 +698,7 @@ action_domain() {
 }
 
 # ---------------------------------------------------------------------------
-# systemd boot persistence (Linux, --user services)
+# Boot persistence (systemd --user services, Linux)
 # ---------------------------------------------------------------------------
 # Absolute path to this command, for the service's ExecStart.
 self_path() {
@@ -773,7 +775,7 @@ main() {
     status|ps)      action_status ;;
     logs)           action_logs ;;
     update)         preflight_tools; action_update ;;
-    version|--version|-V) echo "cf-tunnel ${VERSION}" ;;
+    version)        echo "cf-tunnel ${VERSION}" ;;
     -h|--help|help) usage ;;
     *)              die "Unknown action: '$ACTION' (expected create|apply|up|remove|destroy|show|list|domain|auth|install|uninstall|stop|status|logs|update|version)" ;;
   esac

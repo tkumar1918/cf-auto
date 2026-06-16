@@ -119,7 +119,7 @@ Or clone the repo and run `./cf-tunnel.sh` directly.
 
     cf-tunnel update           # update to the latest release
     cf-tunnel update main      # or track the bleeding edge
-    cf-tunnel update v1.5.0    # or pin a specific tag/branch
+    cf-tunnel update v1.5.2    # or pin a specific tag/branch
     cf-tunnel version          # show the installed version (also -V / --version)
 
 With no argument, `update` resolves the latest release tag and fetches it (stable
